@@ -1,0 +1,68 @@
+pipeline {
+    agent any
+    
+    stages {
+        stage("Clone Code") {
+            steps {
+                echo "Cloning the code"
+                git branch: 'main', credentialsId: 'github', url: 'https://github.com/surajml2319-eng/Java-spring-boot-web-page.git'
+            }
+        }
+        
+        stage("Maven Unit Test") {
+            steps {
+                dir("/var/lib/jenkins/workspace/workshop") {
+                    sh 'mvn test'
+                }
+            }
+        }
+        
+        stage("Maven Build") {
+            steps {
+                dir("/var/lib/jenkins/workspace/workshop") {
+                    sh 'mvn clean install'
+                }
+            }
+        }
+        
+        stage("Maven Integration Test") {
+            steps {
+                dir("/var/lib/jenkins/workspace/workshop") {
+                    sh 'mvn verify'
+                }
+            }
+        }
+        
+        stage("Build Docker Image") {
+            steps {
+                echo "Building the image"
+                sh "docker build -t ci-cd-pipeline ."
+            }
+        }
+        
+        stage("Push to Docker Hub") {
+            steps {
+                echo "Pushing the image to docker hub"
+                withCredentials([usernamePassword(credentialsId: "dockerHub", passwordVariable: "dockerHubPass", usernameVariable: "dockerHubUser")]) {
+                    sh "docker tag ci-cd-pipeline ${env.dockerHubUser}/ci-cd-pipeline:latest"
+                    sh "docker login -u ${env.dockerHubUser} -p ${env.dockerHubPass}"
+                    sh "docker push ${env.dockerHubUser}/ci-cd-pipeline:latest"
+                }
+            }
+        }
+        
+        stage("Deploy to Kubernetes") {
+            steps {
+                script {
+                    dir("/var/lib/jenkins/workspace/workshop") {
+                        withKubeConfig(credentialsId: 'kubernetes') {
+                            sh "kubectl delete --all pods"
+                            sh "kubectl apply -f deployment.yaml"
+                            sh "kubectl apply -f service.yaml"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
