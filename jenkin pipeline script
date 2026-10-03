@@ -11,7 +11,7 @@ pipeline {
         
         stage("Maven Unit Test") {
             steps {
-                dir("/var/lib/jenkins/workspace/workshop") {
+                dir("/var/lib/jenkins/workspace/java_web") {
                     sh 'mvn test'
                 }
             }
@@ -19,7 +19,7 @@ pipeline {
         
         stage("Maven Build") {
             steps {
-                dir("/var/lib/jenkins/workspace/workshop") {
+                dir("/var/lib/jenkins/workspace/java_web") {
                     sh 'mvn clean install'
                 }
             }
@@ -27,7 +27,7 @@ pipeline {
         
         stage("Maven Integration Test") {
             steps {
-                dir("/var/lib/jenkins/workspace/workshop") {
+                dir("/var/lib/jenkins/workspace/java_web") {
                     sh 'mvn verify'
                 }
             }
@@ -42,11 +42,23 @@ pipeline {
         
         stage("Push to Docker Hub") {
             steps {
-                echo "Pushing the image to docker hub"
-                withCredentials([usernamePassword(credentialsId: "dockerHub", passwordVariable: "dockerHubPass", usernameVariable: "dockerHubUser")]) {
-                    sh "docker tag ci-cd-pipeline ${env.dockerHubUser}/ci-cd-pipeline:latest"
-                    sh "docker login -u ${env.dockerHubUser} -p ${env.dockerHubPass}"
-                    sh "docker push ${env.dockerHubUser}/ci-cd-pipeline:latest"
+                script { 
+                    withCredentials([usernamePassword(credentialsId: 'dockerHub', usernameVariable: 'docker_user', passwordVariable: 'docker_pass')]) {
+                        def JOB = env.JOB_NAME.toLowerCase() // Converts job name to lower-case
+                        
+                        // 1. Secure login using triple single quotes
+                        sh '''
+                            printf '%s' "$docker_pass" | docker login -u "$docker_user" --password-stdin
+                        '''
+                        
+                        // 2. Tag the local image with version and latest tags
+                        sh "docker tag ci-cd-pipeline ${docker_user}/${JOB}:v${BUILD_NUMBER}"
+                        sh "docker tag ci-cd-pipeline ${docker_user}/${JOB}:latest"
+                        
+                        // 3. Push both tags to Docker Hub
+                        sh "docker push ${docker_user}/${JOB}:v${BUILD_NUMBER}"
+                        sh "docker push ${docker_user}/${JOB}:latest"
+                    }
                 }
             }
         }
@@ -54,11 +66,13 @@ pipeline {
         stage("Deploy to Kubernetes") {
             steps {
                 script {
-                    dir("/var/lib/jenkins/workspace/workshop") {
-                        withKubeConfig(credentialsId: 'kubernetes') {
-                            sh "kubectl delete --all pods"
+                    dir("/var/lib/jenkins/workspace/java_web") {
+                        // Bind the secret file to the KUBECONFIG environment variable directly
+                        withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'kubernetes', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
+                            sh "kubectl version --client"
+                            sh "kubectl delete pods --all --namespace=default || true"
                             sh "kubectl apply -f deployment.yaml"
-                            sh "kubectl apply -f service.yaml"
+                            sh "kubectl apply -f service.yaml"        
                         }
                     }
                 }
